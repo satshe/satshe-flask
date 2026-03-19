@@ -236,7 +236,7 @@ def send_email_code():
     send_email_async(
         email,
         "satshe 注册验证码",
-        f"你的注册验证码是：{code}\n\n五分钟内有效，请勿泄露给他人。"
+        f"你的注册验证码是：\n{code}\n\n五分钟内有效，请勿泄露给他人。\n\n如果不是你本人操作，请忽略此邮件。\n\n请不要回复此邮件。\n\n欢迎来到 satshe！"
     )
 
     flash("验证码已发送，请检查邮箱", "success")
