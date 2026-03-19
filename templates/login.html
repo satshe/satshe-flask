@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登录</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="auth-page">
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="flash-container">
+                {% for category, message in messages %}
+                    <div class="flash-message flash-{{ category }}">
+                        <span>{{ message }}</span>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+    <div class="auth-bg"></div>
+
+    <div class="auth-card auth-card-large">
+        <div class="auth-top">
+            <div class="brand-badge">S</div>
+            <h1>𝒞𝒾𝒶𝓁𝓁𝑜 ~ (∠ · ω&lt; )︵☆</h1>
+            <p>请登录你的账户</p>
+        </div>
+
+        <form method="post" class="auth-form">
+            <div class="input-group">
+                <label for="email">电子邮箱地址</label>
+                <input id="email" type="email" name="email" placeholder="请输入电子邮箱地址">
+            </div>
+
+            <div class="input-group">
+                <label for="password">密码</label>
+                <input id="password" type="password" name="password" placeholder="请输入密码">
+            </div>
+
+            <button type="submit" class="main-btn">登录</button>
+        </form>
+
+        <div class="auth-links">
+            <a href="/forgot-password">忘记密码？</a>
+        </div>
+
+        <div class="auth-footer">
+            <span>还没有账号？</span>
+            <a href="/register">立即注册</a>
+        </div>
+    </div>
+
+    <script>
+        window.addEventListener("DOMContentLoaded", () => {
+            const messages = document.querySelectorAll(".flash-message");
+
+            messages.forEach(msg => {
+                setTimeout(() => {
+                    msg.style.opacity = "0";
+                    msg.style.transform = "translateY(-10px)";
+                }, 3000);
+
+                setTimeout(() => {
+                    msg.remove();
+                }, 3500);
+            });
+        });
+    </script>
+</body>
+</html>

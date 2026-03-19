@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Saturn_shine · Secret Space</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="saturn-page">
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="flash-container">
+                {% for category, message in messages %}
+                    <div class="flash-message flash-{{ category }}">
+                        <span>{{ message }}</span>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+    <div class="saturn-bg-glow saturn-glow-1"></div>
+    <div class="saturn-bg-glow saturn-glow-2"></div>
+
+    <div class="saturn-shell">
+        <aside class="saturn-sidebar">
+            <div class="saturn-logo">
+                <div class="saturn-logo-core">S</div>
+                <div>
+                    <h2>Saturn_shine</h2>
+                    <p>Private Control Room</p>
+                </div>
+            </div>
+
+            <nav class="saturn-nav">
+                <a href="#" class="saturn-nav-item active">秘密空间</a>
+                <a href="/" class="saturn-nav-item">主页</a>
+                <a href="/logout" class="saturn-nav-item danger">退出登录</a>
+            </nav>
+
+            <div class="saturn-side-card">
+                <h3>当前状态</h3>
+                <p>系统已验证你的身份，这里是只属于 Saturn_shine 的页面。</p>
+            </div>
+        </aside>
+
+        <main class="saturn-main">
+            <section class="saturn-hero">
+                <div class="saturn-hero-text">
+                    <span class="saturn-tag">PRIVATE ACCESS</span>
+                    <h1>欢迎回来，指挥官</h1>
+                    <p>
+                        11111111111
+                    </p>
+                </div>
+
+                <div class="saturn-planet-card">
+                    <div class="planet-ring"></div>
+                    <div class="planet-core"></div>
+                    <p>Saturn Core</p>
+                </div>
+            </section>
+
+            <section class="saturn-grid">
+                <div class="saturn-card">
+                    <h3>身份确认</h3>
+                    <p>用户名：<strong>{{ session["username"] }}</strong></p>
+                    <p>权限级别：Exclusive</p>
+                    <p>状态：已登录并通过专属入口校验</p>
+                </div>
+
+                <div class="saturn-card">
+                    <h3>功能现状</h3>
+                    <p>当前已完成：</p>
+                    <ul>
+                        <li>111</li>
+                        <li>111</li>
+                        <li>111</li>
+                        <li>111</li>
+                        <li>111</li>
+                    </ul>
+                </div>
+
+                <div class="saturn-card wide">
+                    <h3>下一步升级建议</h3>
+                    <p>
+                        1111
+                    </p>
+                    <p>
+                        11111
+                    </p>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        window.addEventListener("DOMContentLoaded", () => {
+            const messages = document.querySelectorAll(".flash-message");
+
+            messages.forEach(msg => {
+                setTimeout(() => {
+                    msg.style.opacity = "0";
+                    msg.style.transform = "translateY(-10px)";
+                }, 3000);
+
+                setTimeout(() => {
+                    msg.remove();
+                }, 3500);
+            });
+        });
+    </script>
+</body>
+</html>

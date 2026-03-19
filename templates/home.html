@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>首页</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="home-page">
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="flash-container">
+                {% for category, message in messages %}
+                    <div class="flash-message flash-{{ category }}">
+                        <span>{{ message }}</span>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+    <div class="home-shell">
+        <div class="home-box">
+            <h1>欢迎你，{{ username }}</h1>
+            <p>你已经进入系统，当前网站正在制作中，敬请期待</p>
+
+            <div class="home-actions">
+                {% if username.lower() == "saturn_shine" %}
+                    <a class="action-btn primary" href="/saturn-shine">进入专属空间</a>
+                {% endif %}
+                <a class="action-btn" href="/logout">退出登录</a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        window.addEventListener("DOMContentLoaded", () => {
+            const messages = document.querySelectorAll(".flash-message");
+
+            messages.forEach(msg => {
+                setTimeout(() => {
+                    msg.style.opacity = "0";
+                    msg.style.transform = "translateY(-10px)";
+                }, 3000);
+
+                setTimeout(() => {
+                    msg.remove();
+                }, 3500);
+            });
+        });
+    </script>
+</body>
+</html>
