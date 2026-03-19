@@ -534,8 +534,8 @@ def logout():
     return redirect("/login")
 
 
-# 确保无论本地还是 Gunicorn / Render，数据库都存在
-init_db()
+
 
 if __name__ == "__main__":
+    init_db()
     app.run(debug=False)
