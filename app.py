@@ -16,7 +16,7 @@ SMTP_USER = os.environ.get("SMTP_USER")
 SMTP_PASS = os.environ.get("SMTP_PASS")
 SECRET_KEY = os.environ.get("SECRET_KEY")
 
-BASE_URL = "http://127.0.0.1:5000" 
+BASE_URL = "https://satshe.com" 
 
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
