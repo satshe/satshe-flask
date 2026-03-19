@@ -1,20 +1,16 @@
 from flask import Flask, render_template, request, redirect, session, flash
 import sqlite3
 from werkzeug.security import generate_password_hash, check_password_hash
-from email.message import EmailMessage
-import smtplib
 import secrets
 import random
 import datetime
 import re
 import os
 import threading
+import resend
 
-
-SMTP_HOST = "smtp.gmail.com"
-SMTP_PORT = 465
-SMTP_USER = os.environ.get("SMTP_USER")
-SMTP_PASS = os.environ.get("SMTP_PASS")
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY")
+MAIL_FROM = os.environ.get("MAIL_FROM")
 SECRET_KEY = os.environ.get("SECRET_KEY")
 
 BASE_URL = "https://satshe.com"
@@ -70,36 +66,33 @@ def init_db():
 
 
 def send_email(to_email, subject, content):
-    if not SMTP_USER or not SMTP_PASS:
-        raise RuntimeError("SMTP 环境变量未配置完整")
+    if not RESEND_API_KEY:
+        raise RuntimeError("RESEND_API_KEY 未配置")
+    if not MAIL_FROM:
+        raise RuntimeError("MAIL_FROM 未配置")
 
-    msg = EmailMessage()
-    msg["Subject"] = subject
-    msg["From"] = SMTP_USER
-    msg["To"] = to_email
-    msg.set_content(content)
+    resend.api_key = RESEND_API_KEY
 
-    # 加 timeout，避免 SMTP 长时间卡死 worker
-    with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=10) as smtp:
-        smtp.login(SMTP_USER, SMTP_PASS)
-        smtp.send_message(msg)
+    params = {
+        "from": MAIL_FROM,
+        "to": [to_email],
+        "subject": subject,
+        "text": content,
+    }
+
+    result = resend.Emails.send(params)
+    print(f"[MAIL OK] to={to_email} subject={subject} result={result}")
 
 
 def send_email_async(to_email, subject, content):
     def worker():
         try:
             send_email(to_email, subject, content)
-            print(f"[MAIL OK] to={to_email} subject={subject}")
         except Exception as e:
-            # 异步发送失败只打日志，不让用户请求卡死
             print(f"[MAIL ERROR] to={to_email} subject={subject} error={repr(e)}")
 
     thread = threading.Thread(target=worker, daemon=True)
     thread.start()
-
-
-def now_iso():
-    return datetime.datetime.now().isoformat()
 
 
 def get_client_ip():
@@ -153,6 +146,11 @@ def count_recent_by_ip(cursor, table_name, ip_address, after_time):
     return cursor.fetchone()[0]
 
 
+@app.before_request
+def ensure_db_ready():
+    init_db()
+
+
 @app.route("/")
 def index():
     if "username" in session:
@@ -166,7 +164,6 @@ def send_email_code():
     ip_address = get_client_ip()
     now = datetime.datetime.now()
 
-    # 保留注册页里已填的用户名/邮箱，别让用户刷新后全丢
     session["temp_username"] = request.form.get("username", "").strip()
     session["temp_email"] = email
 
@@ -236,7 +233,6 @@ def send_email_code():
     conn.commit()
     conn.close()
 
-    # 改为异步发邮件，用户立刻返回，不阻塞页面
     send_email_async(
         email,
         "satshe 注册验证码",
@@ -257,7 +253,6 @@ def register():
         code = request.form.get("code", "").strip()
         agree_terms = request.form.get("agree_terms")
 
-        # 仅保留非敏感字段
         session["temp_username"] = username
         session["temp_email"] = email
 
@@ -438,7 +433,6 @@ def forgot_password():
 
             reset_link = f"{BASE_URL}/reset-password/{token}"
 
-            # 同样改为异步，不阻塞用户
             send_email_async(
                 email,
                 "Saturn_shine 重置密码",
@@ -532,8 +526,6 @@ def logout():
     session.pop("username", None)
     flash("你已退出登录", "success")
     return redirect("/login")
-
-
 
 
 if __name__ == "__main__":
