@@ -818,3 +818,10 @@ body {
     padding: 0 20px;
     height: 46px;
 }
+
+.code-btn:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}

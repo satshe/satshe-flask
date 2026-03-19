@@ -8,6 +8,7 @@ import random
 import datetime
 import re
 import os
+import threading
 
 
 SMTP_HOST = "smtp.gmail.com"
@@ -16,10 +17,10 @@ SMTP_USER = os.environ.get("SMTP_USER")
 SMTP_PASS = os.environ.get("SMTP_PASS")
 SECRET_KEY = os.environ.get("SECRET_KEY")
 
-BASE_URL = "https://satshe.com" 
+BASE_URL = "https://satshe.com"
 
 app = Flask(__name__)
-app.secret_key = SECRET_KEY
+app.secret_key = SECRET_KEY or "dev-fallback-secret-key-change-me"
 
 
 def get_conn():
@@ -69,15 +70,32 @@ def init_db():
 
 
 def send_email(to_email, subject, content):
+    if not SMTP_USER or not SMTP_PASS:
+        raise RuntimeError("SMTP 环境变量未配置完整")
+
     msg = EmailMessage()
     msg["Subject"] = subject
     msg["From"] = SMTP_USER
     msg["To"] = to_email
     msg.set_content(content)
 
-    with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT) as smtp:
+    # 加 timeout，避免 SMTP 长时间卡死 worker
+    with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=10) as smtp:
         smtp.login(SMTP_USER, SMTP_PASS)
         smtp.send_message(msg)
+
+
+def send_email_async(to_email, subject, content):
+    def worker():
+        try:
+            send_email(to_email, subject, content)
+            print(f"[MAIL OK] to={to_email} subject={subject}")
+        except Exception as e:
+            # 异步发送失败只打日志，不让用户请求卡死
+            print(f"[MAIL ERROR] to={to_email} subject={subject} error={repr(e)}")
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
 
 
 def now_iso():
@@ -96,7 +114,15 @@ def is_valid_email(email):
     return re.match(pattern, email) is not None
 
 
+def validate_table_name(table_name):
+    allowed = {"email_codes", "password_resets"}
+    if table_name not in allowed:
+        raise ValueError("非法表名")
+    return table_name
+
+
 def get_latest_row(cursor, table_name, email):
+    table_name = validate_table_name(table_name)
     cursor.execute(f"""
         SELECT id, created_at
         FROM {table_name}
@@ -108,6 +134,7 @@ def get_latest_row(cursor, table_name, email):
 
 
 def count_recent_by_email(cursor, table_name, email, after_time):
+    table_name = validate_table_name(table_name)
     cursor.execute(f"""
         SELECT COUNT(*)
         FROM {table_name}
@@ -117,6 +144,7 @@ def count_recent_by_email(cursor, table_name, email, after_time):
 
 
 def count_recent_by_ip(cursor, table_name, ip_address, after_time):
+    table_name = validate_table_name(table_name)
     cursor.execute(f"""
         SELECT COUNT(*)
         FROM {table_name}
@@ -138,6 +166,10 @@ def send_email_code():
     ip_address = get_client_ip()
     now = datetime.datetime.now()
 
+    # 保留注册页里已填的用户名/邮箱，别让用户刷新后全丢
+    session["temp_username"] = request.form.get("username", "").strip()
+    session["temp_email"] = email
+
     if not email:
         flash("请先输入电子邮箱地址", "error")
         return redirect("/register")
@@ -149,7 +181,6 @@ def send_email_code():
     conn = get_conn()
     cursor = conn.cursor()
 
-    # 邮箱已注册直接拦
     cursor.execute("SELECT id FROM users WHERE email = ?", (email,))
     exists = cursor.fetchone()
     if exists:
@@ -157,7 +188,6 @@ def send_email_code():
         flash("该邮箱已被注册", "error")
         return redirect("/register")
 
-    # 同邮箱 60 秒冷却
     latest = get_latest_row(cursor, "email_codes", email)
     if latest:
         _, latest_created_at = latest
@@ -167,7 +197,6 @@ def send_email_code():
             flash("该邮箱请求过于频繁，请60秒后再试", "error")
             return redirect("/register")
 
-    # 同邮箱 24 小时最多 8 次
     day_ago = (now - datetime.timedelta(days=1)).isoformat()
     email_daily_count = count_recent_by_email(cursor, "email_codes", email, day_ago)
     if email_daily_count >= 8:
@@ -175,7 +204,6 @@ def send_email_code():
         flash("该邮箱今日验证码发送次数已达上限", "error")
         return redirect("/register")
 
-    # 同 IP 1 分钟最多 3 次
     minute_ago = (now - datetime.timedelta(minutes=1)).isoformat()
     ip_1min_count = count_recent_by_ip(cursor, "email_codes", ip_address, minute_ago)
     if ip_1min_count >= 3:
@@ -183,7 +211,6 @@ def send_email_code():
         flash("当前网络请求过于频繁，请稍后再试", "error")
         return redirect("/register")
 
-    # 同 IP 1 小时最多 20 次
     hour_ago = (now - datetime.timedelta(hours=1)).isoformat()
     ip_1hour_count = count_recent_by_ip(cursor, "email_codes", ip_address, hour_ago)
     if ip_1hour_count >= 20:
@@ -191,7 +218,6 @@ def send_email_code():
         flash("当前网络发送次数过多，请1小时后再试", "error")
         return redirect("/register")
 
-    # 旧验证码全部作废，只认最新一条
     cursor.execute("""
         UPDATE email_codes
         SET used = 1
@@ -210,16 +236,12 @@ def send_email_code():
     conn.commit()
     conn.close()
 
-    try:
-        send_email(
-            email,
-            "satshe 注册验证码",
-            f"你的注册验证码是：{code}\n\n\n五分钟内有效，请勿泄露给他人。"
-        )
-    except Exception as e:
-        print("发送验证码邮件错误：", repr(e))
-        flash(f"邮件发送失败：{e}", "error")
-        return redirect("/register")
+    # 改为异步发邮件，用户立刻返回，不阻塞页面
+    send_email_async(
+        email,
+        "satshe 注册验证码",
+        f"你的注册验证码是：{code}\n\n五分钟内有效，请勿泄露给他人。"
+    )
 
     flash("验证码已发送，请检查邮箱", "success")
     return redirect("/register")
@@ -232,12 +254,12 @@ def register():
         email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "").strip()
         confirm_password = request.form.get("confirm_password", "").strip()
-        session["temp_username"] = username
-        session["temp_email"] = email
-        session["temp_password"] = password
-        session["temp_confirm_password"] = confirm_password
         code = request.form.get("code", "").strip()
         agree_terms = request.form.get("agree_terms")
+
+        # 仅保留非敏感字段
+        session["temp_username"] = username
+        session["temp_email"] = email
 
         if not username or not email or not password or not confirm_password or not code:
             flash("所有字段都不能为空", "error")
@@ -310,8 +332,6 @@ def register():
         flash("注册成功，请登录", "success")
         session.pop("temp_username", None)
         session.pop("temp_email", None)
-        session.pop("temp_password", None)
-        session.pop("temp_confirm_password", None)
         return redirect("/login")
 
     return render_template("register.html")
@@ -371,7 +391,6 @@ def forgot_password():
         conn = get_conn()
         cursor = conn.cursor()
 
-        # 同邮箱 120 秒冷却
         latest = get_latest_row(cursor, "password_resets", email)
         if latest:
             _, latest_created_at = latest
@@ -381,7 +400,6 @@ def forgot_password():
                 flash("请求过于频繁，请稍后再试", "error")
                 return redirect("/forgot-password")
 
-        # 同邮箱 24 小时最多 5 次
         day_ago = (now - datetime.timedelta(days=1)).isoformat()
         email_daily_count = count_recent_by_email(cursor, "password_resets", email, day_ago)
         if email_daily_count >= 5:
@@ -389,7 +407,6 @@ def forgot_password():
             flash("该邮箱今日重置次数已达上限", "error")
             return redirect("/forgot-password")
 
-        # 同 IP 1 小时最多 10 次
         hour_ago = (now - datetime.timedelta(hours=1)).isoformat()
         ip_1hour_count = count_recent_by_ip(cursor, "password_resets", ip_address, hour_ago)
         if ip_1hour_count >= 10:
@@ -397,12 +414,10 @@ def forgot_password():
             flash("当前网络请求过于频繁，请稍后再试", "error")
             return redirect("/forgot-password")
 
-        # 不暴露邮箱是否存在
         cursor.execute("SELECT id FROM users WHERE email = ?", (email,))
         user = cursor.fetchone()
 
         if user:
-            # 旧 token 失效，只认最新一条
             cursor.execute("""
                 UPDATE password_resets
                 SET used = 1
@@ -423,15 +438,12 @@ def forgot_password():
 
             reset_link = f"{BASE_URL}/reset-password/{token}"
 
-            try:
-                send_email(
-                    email,
-                    "Saturn_shine 重置密码",
-                    f"请点击下面链接重置密码：\n{reset_link}\n\n该链接30分钟内有效。"
-                )
-            except Exception:
-                flash("邮件发送失败，请稍后重试", "error")
-                return redirect("/forgot-password")
+            # 同样改为异步，不阻塞用户
+            send_email_async(
+                email,
+                "Saturn_shine 重置密码",
+                f"请点击下面链接重置密码：\n{reset_link}\n\n该链接30分钟内有效。"
+            )
         else:
             conn.close()
 
@@ -522,6 +534,8 @@ def logout():
     return redirect("/login")
 
 
+# 确保无论本地还是 Gunicorn / Render，数据库都存在
+init_db()
+
 if __name__ == "__main__":
-    init_db()
     app.run(debug=False)

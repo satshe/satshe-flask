@@ -32,31 +32,63 @@
         <form method="post" class="auth-form" id="registerForm">
             <div class="input-group">
                 <label for="username">用户名</label>
-                <input id="username" type="text" name="username" placeholder="设置一个用户名" value="{{ session.get('temp_username', '') }}">
+                <input
+                    id="username"
+                    type="text"
+                    name="username"
+                    placeholder="设置一个用户名"
+                    value="{{ session.get('temp_username', '') }}"
+                >
             </div>
 
             <div class="input-group">
                 <label for="email">电子邮箱地址</label>
-                <input id="email" type="email" name="email" placeholder="请输入你的邮箱" value="{{ session.get('temp_email', '') }}">
+                <input
+                    id="email"
+                    type="email"
+                    name="email"
+                    placeholder="请输入你的邮箱"
+                    value="{{ session.get('temp_email', '') }}"
+                >
             </div>
 
             <div class="input-group">
                 <label for="password">密码</label>
-                <input id="password" type="password" name="password" placeholder="密码至少6位" value="{{ session.get('temp_password', '') }}">
+                <input
+                    id="password"
+                    type="password"
+                    name="password"
+                    placeholder="密码至少6位"
+                >
             </div>
 
             <div class="input-group">
                 <label for="confirm_password">确认密码</label>
-                <input id="confirm_password" type="password" name="confirm_password" placeholder="请再次输入密码" value="{{ session.get('temp_confirm_password', '') }}">
+                <input
+                    id="confirm_password"
+                    type="password"
+                    name="confirm_password"
+                    placeholder="请再次输入密码"
+                >
             </div>
 
-            <button type="submit" formaction="/send-email-code" class="secondary-btn code-btn">
+            <button
+                type="submit"
+                formaction="/send-email-code"
+                class="secondary-btn code-btn"
+                id="sendCodeBtn"
+            >
                 发送验证码
             </button>
 
             <div class="input-group">
                 <label for="code">邮箱验证码</label>
-                <input id="code" type="text" name="code" placeholder="请输入6位验证码">
+                <input
+                    id="code"
+                    type="text"
+                    name="code"
+                    placeholder="请输入6位验证码"
+                >
             </div>
 
             <button type="submit" class="main-btn">注册账号</button>
@@ -105,7 +137,9 @@
 
     <script>
         window.addEventListener("DOMContentLoaded", () => {
+            // =========================
             // flash 3秒消失
+            // =========================
             const messages = document.querySelectorAll(".flash-message");
             messages.forEach(msg => {
                 setTimeout(() => {
@@ -118,7 +152,9 @@
                 }, 3500);
             });
 
+            // =========================
             // 条款弹窗
+            // =========================
             const termsModal = document.getElementById("termsModal");
             const openTerms = document.getElementById("openTerms");
             const closeTerms = document.getElementById("closeTerms");
@@ -144,38 +180,103 @@
                 }
             });
 
+            // =========================
+            // 发送验证码按钮 60 秒倒计时
+            // =========================
+            const sendCodeBtn = document.getElementById("sendCodeBtn");
+            const emailInput = document.getElementById("email");
+            const countdownKey = "send_code_countdown_until";
+
+            function showFlashError(message) {
+                const flashContainer = document.querySelector(".flash-container") || (() => {
+                    const div = document.createElement("div");
+                    div.className = "flash-container";
+                    document.body.appendChild(div);
+                    return div;
+                })();
+
+                const msg = document.createElement("div");
+                msg.className = "flash-message flash-error";
+                msg.innerHTML = `<span>${message}</span>`;
+                flashContainer.appendChild(msg);
+
+                setTimeout(() => {
+                    msg.style.opacity = "0";
+                    msg.style.transform = "translateY(-10px)";
+                }, 3000);
+
+                setTimeout(() => {
+                    msg.remove();
+                }, 3500);
+            }
+
+            function updateCountdownUI() {
+                const until = parseInt(localStorage.getItem(countdownKey) || "0", 10);
+                const now = Date.now();
+                const remaining = Math.ceil((until - now) / 1000);
+
+                if (remaining > 0) {
+                    sendCodeBtn.disabled = true;
+                    sendCodeBtn.textContent = `${remaining}秒后重新发送`;
+                    sendCodeBtn.style.opacity = "0.7";
+                    sendCodeBtn.style.cursor = "not-allowed";
+                    return true;
+                } else {
+                    sendCodeBtn.disabled = false;
+                    sendCodeBtn.textContent = "发送验证码";
+                    sendCodeBtn.style.opacity = "";
+                    sendCodeBtn.style.cursor = "";
+                    localStorage.removeItem(countdownKey);
+                    return false;
+                }
+            }
+
+            updateCountdownUI();
+
+            const countdownTimer = setInterval(() => {
+                updateCountdownUI();
+            }, 1000);
+
+            // =========================
+            // 表单提交校验
+            // =========================
             registerForm.addEventListener("submit", (e) => {
                 const submitter = e.submitter;
 
-                // 发送验证码按钮不要求勾选条款
-                if (submitter && submitter.formAction.includes("/send-email-code")) {
+                if (!submitter) return;
+
+                // 发送验证码按钮逻辑
+                if (submitter.formAction.includes("/send-email-code")) {
+                    if (updateCountdownUI()) {
+                        e.preventDefault();
+                        showFlashError("请稍后再发送验证码");
+                        return;
+                    }
+
+                    const email = emailInput.value.trim();
+                    if (!email) {
+                        e.preventDefault();
+                        showFlashError("请先输入电子邮箱地址");
+                        return;
+                    }
+
+                    // 先开始倒计时，避免用户狂点
+                    const until = Date.now() + 60000;
+                    localStorage.setItem(countdownKey, String(until));
+                    updateCountdownUI();
                     return;
                 }
 
+                // 注册按钮逻辑：必须勾选条款
                 if (!agreeTerms.checked) {
                     e.preventDefault();
-
-                    const flashContainer = document.querySelector(".flash-container") || (() => {
-                        const div = document.createElement("div");
-                        div.className = "flash-container";
-                        document.body.appendChild(div);
-                        return div;
-                    })();
-
-                    const msg = document.createElement("div");
-                    msg.className = "flash-message flash-error";
-                    msg.innerHTML = "<span>请先勾选并同意网站准则</span>";
-                    flashContainer.appendChild(msg);
-
-                    setTimeout(() => {
-                        msg.style.opacity = "0";
-                        msg.style.transform = "translateY(-10px)";
-                    }, 3000);
-
-                    setTimeout(() => {
-                        msg.remove();
-                    }, 3500);
+                    showFlashError("请先勾选并同意网站准则");
                 }
+            });
+
+            // 页面卸载时清理 interval
+            window.addEventListener("beforeunload", () => {
+                clearInterval(countdownTimer);
             });
         });
     </script>
