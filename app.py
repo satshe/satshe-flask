@@ -1,5 +1,6 @@
 from flask import Flask, render_template, request, redirect, session, flash
-import sqlite3
+import psycopg2
+from psycopg2.extras import RealDictCursor
 from werkzeug.security import generate_password_hash, check_password_hash
 import secrets
 import random
@@ -12,15 +13,24 @@ import resend
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY")
 MAIL_FROM = os.environ.get("MAIL_FROM")
 SECRET_KEY = os.environ.get("SECRET_KEY")
+DATABASE_URL = os.environ.get("DATABASE_URL")
+BASE_URL = os.environ.get("BASE_URL", "https://satshe.com")
 
-BASE_URL = "https://satshe.com"
+if not SECRET_KEY:
+    raise RuntimeError("SECRET_KEY 未配置")
+
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL 未配置")
 
 app = Flask(__name__)
-app.secret_key = SECRET_KEY or "dev-fallback-secret-key-change-me"
+app.secret_key = SECRET_KEY
 
+with app.app_context():
+    init_db()
 
 def get_conn():
-    return sqlite3.connect("users.db")
+    conn = psycopg2.connect(DATABASE_URL)
+    return conn
 
 
 def init_db():
@@ -29,7 +39,7 @@ def init_db():
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             username TEXT NOT NULL UNIQUE,
             email TEXT NOT NULL UNIQUE,
             password TEXT NOT NULL,
@@ -39,11 +49,11 @@ def init_db():
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS email_codes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             email TEXT NOT NULL,
             code TEXT NOT NULL,
-            expires_at TEXT NOT NULL,
-            created_at TEXT NOT NULL,
+            expires_at TIMESTAMP NOT NULL,
+            created_at TIMESTAMP NOT NULL,
             ip_address TEXT NOT NULL,
             used INTEGER NOT NULL DEFAULT 0
         )
@@ -51,17 +61,18 @@ def init_db():
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS password_resets (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             email TEXT NOT NULL,
             token TEXT NOT NULL,
-            expires_at TEXT NOT NULL,
-            created_at TEXT NOT NULL,
+            expires_at TIMESTAMP NOT NULL,
+            created_at TIMESTAMP NOT NULL,
             ip_address TEXT NOT NULL,
             used INTEGER NOT NULL DEFAULT 0
         )
     """)
 
     conn.commit()
+    cursor.close()
     conn.close()
 
 
@@ -119,7 +130,7 @@ def get_latest_row(cursor, table_name, email):
     cursor.execute(f"""
         SELECT id, created_at
         FROM {table_name}
-        WHERE email = ?
+        WHERE email = %s
         ORDER BY id DESC
         LIMIT 1
     """, (email,))
@@ -131,7 +142,7 @@ def count_recent_by_email(cursor, table_name, email, after_time):
     cursor.execute(f"""
         SELECT COUNT(*)
         FROM {table_name}
-        WHERE email = ? AND created_at >= ?
+        WHERE email = %s AND created_at >= %s
     """, (email, after_time))
     return cursor.fetchone()[0]
 
@@ -141,14 +152,9 @@ def count_recent_by_ip(cursor, table_name, ip_address, after_time):
     cursor.execute(f"""
         SELECT COUNT(*)
         FROM {table_name}
-        WHERE ip_address = ? AND created_at >= ?
+        WHERE ip_address = %s AND created_at >= %s
     """, (ip_address, after_time))
     return cursor.fetchone()[0]
-
-
-@app.before_request
-def ensure_db_ready():
-    init_db()
 
 
 @app.route("/")
@@ -178,7 +184,7 @@ def send_email_code():
     conn = get_conn()
     cursor = conn.cursor()
 
-    cursor.execute("SELECT id FROM users WHERE email = ?", (email,))
+    cursor.execute("SELECT id FROM users WHERE email = %s", (email,))
     exists = cursor.fetchone()
     if exists:
         conn.close()
@@ -194,21 +200,21 @@ def send_email_code():
             flash("该邮箱请求过于频繁，请60秒后再试", "error")
             return redirect("/register")
 
-    day_ago = (now - datetime.timedelta(days=1)).isoformat()
+    day_ago = now - datetime.timedelta(days=1)
     email_daily_count = count_recent_by_email(cursor, "email_codes", email, day_ago)
     if email_daily_count >= 8:
         conn.close()
         flash("该邮箱今日验证码发送次数已达上限", "error")
         return redirect("/register")
 
-    minute_ago = (now - datetime.timedelta(minutes=1)).isoformat()
+    minute_ago = now - datetime.timedelta(minutes=1)
     ip_1min_count = count_recent_by_ip(cursor, "email_codes", ip_address, minute_ago)
     if ip_1min_count >= 3:
         conn.close()
         flash("当前网络请求过于频繁，请稍后再试", "error")
         return redirect("/register")
 
-    hour_ago = (now - datetime.timedelta(hours=1)).isoformat()
+    hour_ago = now - datetime.timedelta(hours=1)
     ip_1hour_count = count_recent_by_ip(cursor, "email_codes", ip_address, hour_ago)
     if ip_1hour_count >= 20:
         conn.close()
@@ -218,16 +224,16 @@ def send_email_code():
     cursor.execute("""
         UPDATE email_codes
         SET used = 1
-        WHERE email = ? AND used = 0
+        WHERE email = %s AND used = 0
     """, (email,))
 
     code = str(random.randint(100000, 999999))
-    created_at = now.isoformat()
-    expires_at = (now + datetime.timedelta(minutes=5)).isoformat()
+    created_at = now
+    expires_at = now + datetime.timedelta(minutes=5)
 
     cursor.execute("""
         INSERT INTO email_codes (email, code, expires_at, created_at, ip_address, used)
-        VALUES (?, ?, ?, ?, ?, 0)
+        VALUES (%s, %s, %s, %s, %s, 0)
     """, (email, code, expires_at, created_at, ip_address))
 
     conn.commit()
@@ -282,7 +288,7 @@ def register():
         cursor.execute("""
             SELECT id, code, expires_at
             FROM email_codes
-            WHERE email = ? AND used = 0
+            WHERE email = %s AND used = 0
             ORDER BY id DESC
             LIMIT 1
         """, (email,))
@@ -295,7 +301,7 @@ def register():
 
         code_id, db_code, expires_at = row
 
-        if datetime.datetime.now() > datetime.datetime.fromisoformat(expires_at):
+        if datetime.datetime.now() > expires_at:
             conn.close()
             flash("验证码已过期，请重新获取", "error")
             return redirect("/register")
@@ -308,13 +314,13 @@ def register():
         try:
             cursor.execute("""
                 INSERT INTO users (username, email, password, email_verified)
-                VALUES (?, ?, ?, 1)
+                VALUES (%s, %s, %s, 1)
             """, (username, email, generate_password_hash(password)))
 
             cursor.execute("""
                 UPDATE email_codes
                 SET used = 1
-                WHERE id = ?
+                WHERE id = %s
             """, (code_id,))
 
             conn.commit()
@@ -347,7 +353,7 @@ def login():
         cursor.execute("""
             SELECT username, password
             FROM users
-            WHERE email = ?
+            WHERE email = %s
         """, (email,))
         user = cursor.fetchone()
         conn.close()
@@ -389,7 +395,7 @@ def forgot_password():
         latest = get_latest_row(cursor, "password_resets", email)
         if latest:
             _, latest_created_at = latest
-            latest_dt = datetime.datetime.fromisoformat(latest_created_at)
+            latest_dt = latest_created_at
             if (now - latest_dt).total_seconds() < 120:
                 conn.close()
                 flash("请求过于频繁，请稍后再试", "error")
@@ -409,23 +415,23 @@ def forgot_password():
             flash("当前网络请求过于频繁，请稍后再试", "error")
             return redirect("/forgot-password")
 
-        cursor.execute("SELECT id FROM users WHERE email = ?", (email,))
+        cursor.execute("SELECT id FROM users WHERE email = %s", (email,))
         user = cursor.fetchone()
 
         if user:
             cursor.execute("""
                 UPDATE password_resets
                 SET used = 1
-                WHERE email = ? AND used = 0
+                WHERE email = %s AND used = 0
             """, (email,))
 
             token = secrets.token_urlsafe(32)
-            created_at = now.isoformat()
-            expires_at = (now + datetime.timedelta(minutes=30)).isoformat()
+            created_at = now
+            expires_at = now + datetime.timedelta(minutes=30)
 
             cursor.execute("""
                 INSERT INTO password_resets (email, token, expires_at, created_at, ip_address, used)
-                VALUES (?, ?, ?, ?, ?, 0)
+                VALUES (%s, %s, %s, %s, %s, 0)
             """, (email, token, expires_at, created_at, ip_address))
 
             conn.commit()
@@ -455,7 +461,7 @@ def reset_password(token):
     cursor.execute("""
         SELECT id, email, expires_at, used
         FROM password_resets
-        WHERE token = ?
+        WHERE token = %s
         ORDER BY id DESC
         LIMIT 1
     """, (token,))
@@ -473,7 +479,7 @@ def reset_password(token):
         flash("该重置链接已使用", "error")
         return redirect("/login")
 
-    if datetime.datetime.now() > datetime.datetime.fromisoformat(expires_at):
+    if datetime.datetime.now() > expires_at:
         conn.close()
         flash("重置链接已过期", "error")
         return redirect("/login")
@@ -493,14 +499,14 @@ def reset_password(token):
 
         cursor.execute("""
             UPDATE users
-            SET password = ?
-            WHERE email = ?
+            SET password = %s
+            WHERE email = %s
         """, (generate_password_hash(password), email))
 
         cursor.execute("""
             UPDATE password_resets
             SET used = 1
-            WHERE id = ?
+            WHERE id = %s
         """, (reset_id,))
 
         conn.commit()

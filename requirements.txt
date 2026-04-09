@@ -2,3 +2,4 @@ flask
 gunicorn
 werkzeug
 resend
+psycopg2-binary
