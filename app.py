@@ -1,6 +1,5 @@
 from flask import Flask, render_template, request, redirect, session, flash
 import psycopg2
-from psycopg2.extras import RealDictCursor
 from werkzeug.security import generate_password_hash, check_password_hash
 import secrets
 import random
@@ -25,11 +24,15 @@ if not DATABASE_URL:
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
 
-with app.app_context():
-    init_db()
 
 def get_conn():
-    conn = psycopg2.connect(DATABASE_URL)
+    db_url = DATABASE_URL
+
+    # 兼容部分平台可能给出的旧格式 postgres://
+    if db_url.startswith("postgres://"):
+        db_url = db_url.replace("postgres://", "postgresql://", 1)
+
+    conn = psycopg2.connect(db_url)
     return conn
 
 
@@ -157,6 +160,10 @@ def count_recent_by_ip(cursor, table_name, ip_address, after_time):
     return cursor.fetchone()[0]
 
 
+# 启动时初始化数据库
+init_db()
+
+
 @app.route("/")
 def index():
     if "username" in session:
@@ -187,6 +194,7 @@ def send_email_code():
     cursor.execute("SELECT id FROM users WHERE email = %s", (email,))
     exists = cursor.fetchone()
     if exists:
+        cursor.close()
         conn.close()
         flash("该邮箱已被注册", "error")
         return redirect("/register")
@@ -194,8 +202,9 @@ def send_email_code():
     latest = get_latest_row(cursor, "email_codes", email)
     if latest:
         _, latest_created_at = latest
-        latest_dt = datetime.datetime.fromisoformat(latest_created_at)
+        latest_dt = latest_created_at
         if (now - latest_dt).total_seconds() < 60:
+            cursor.close()
             conn.close()
             flash("该邮箱请求过于频繁，请60秒后再试", "error")
             return redirect("/register")
@@ -203,6 +212,7 @@ def send_email_code():
     day_ago = now - datetime.timedelta(days=1)
     email_daily_count = count_recent_by_email(cursor, "email_codes", email, day_ago)
     if email_daily_count >= 8:
+        cursor.close()
         conn.close()
         flash("该邮箱今日验证码发送次数已达上限", "error")
         return redirect("/register")
@@ -210,6 +220,7 @@ def send_email_code():
     minute_ago = now - datetime.timedelta(minutes=1)
     ip_1min_count = count_recent_by_ip(cursor, "email_codes", ip_address, minute_ago)
     if ip_1min_count >= 3:
+        cursor.close()
         conn.close()
         flash("当前网络请求过于频繁，请稍后再试", "error")
         return redirect("/register")
@@ -217,6 +228,7 @@ def send_email_code():
     hour_ago = now - datetime.timedelta(hours=1)
     ip_1hour_count = count_recent_by_ip(cursor, "email_codes", ip_address, hour_ago)
     if ip_1hour_count >= 20:
+        cursor.close()
         conn.close()
         flash("当前网络发送次数过多，请1小时后再试", "error")
         return redirect("/register")
@@ -237,6 +249,7 @@ def send_email_code():
     """, (email, code, expires_at, created_at, ip_address))
 
     conn.commit()
+    cursor.close()
     conn.close()
 
     send_email_async(
@@ -295,6 +308,7 @@ def register():
         row = cursor.fetchone()
 
         if not row:
+            cursor.close()
             conn.close()
             flash("请先获取邮箱验证码", "error")
             return redirect("/register")
@@ -302,11 +316,13 @@ def register():
         code_id, db_code, expires_at = row
 
         if datetime.datetime.now() > expires_at:
+            cursor.close()
             conn.close()
             flash("验证码已过期，请重新获取", "error")
             return redirect("/register")
 
         if code != db_code:
+            cursor.close()
             conn.close()
             flash("验证码错误", "error")
             return redirect("/register")
@@ -324,11 +340,14 @@ def register():
             """, (code_id,))
 
             conn.commit()
-        except sqlite3.IntegrityError:
+        except psycopg2.Error:
+            conn.rollback()
+            cursor.close()
             conn.close()
             flash("用户名或邮箱已存在", "error")
             return redirect("/register")
 
+        cursor.close()
         conn.close()
         flash("注册成功，请登录", "success")
         session.pop("temp_username", None)
@@ -356,6 +375,7 @@ def login():
             WHERE email = %s
         """, (email,))
         user = cursor.fetchone()
+        cursor.close()
         conn.close()
 
         if user and check_password_hash(user[1], password):
@@ -397,20 +417,23 @@ def forgot_password():
             _, latest_created_at = latest
             latest_dt = latest_created_at
             if (now - latest_dt).total_seconds() < 120:
+                cursor.close()
                 conn.close()
                 flash("请求过于频繁，请稍后再试", "error")
                 return redirect("/forgot-password")
 
-        day_ago = (now - datetime.timedelta(days=1)).isoformat()
+        day_ago = now - datetime.timedelta(days=1)
         email_daily_count = count_recent_by_email(cursor, "password_resets", email, day_ago)
         if email_daily_count >= 5:
+            cursor.close()
             conn.close()
             flash("该邮箱今日重置次数已达上限", "error")
             return redirect("/forgot-password")
 
-        hour_ago = (now - datetime.timedelta(hours=1)).isoformat()
+        hour_ago = now - datetime.timedelta(hours=1)
         ip_1hour_count = count_recent_by_ip(cursor, "password_resets", ip_address, hour_ago)
         if ip_1hour_count >= 10:
+            cursor.close()
             conn.close()
             flash("当前网络请求过于频繁，请稍后再试", "error")
             return redirect("/forgot-password")
@@ -435,7 +458,6 @@ def forgot_password():
             """, (email, token, expires_at, created_at, ip_address))
 
             conn.commit()
-            conn.close()
 
             reset_link = f"{BASE_URL}/reset-password/{token}"
 
@@ -444,8 +466,9 @@ def forgot_password():
                 "Saturn_shine 重置密码",
                 f"请点击下面链接重置密码：\n{reset_link}\n\n该链接30分钟内有效。"
             )
-        else:
-            conn.close()
+
+        cursor.close()
+        conn.close()
 
         flash("如果该邮箱已注册，我们已发送重置邮件", "success")
         return redirect("/login")
@@ -468,6 +491,7 @@ def reset_password(token):
     row = cursor.fetchone()
 
     if not row:
+        cursor.close()
         conn.close()
         flash("重置链接无效", "error")
         return redirect("/login")
@@ -475,11 +499,13 @@ def reset_password(token):
     reset_id, email, expires_at, used = row
 
     if used == 1:
+        cursor.close()
         conn.close()
         flash("该重置链接已使用", "error")
         return redirect("/login")
 
     if datetime.datetime.now() > expires_at:
+        cursor.close()
         conn.close()
         flash("重置链接已过期", "error")
         return redirect("/login")
@@ -488,11 +514,13 @@ def reset_password(token):
         password = request.form.get("password", "").strip()
 
         if not password:
+            cursor.close()
             conn.close()
             flash("新密码不能为空", "error")
             return redirect(f"/reset-password/{token}")
 
         if len(password) < 6:
+            cursor.close()
             conn.close()
             flash("密码长度至少为6个字符", "error")
             return redirect(f"/reset-password/{token}")
@@ -510,11 +538,13 @@ def reset_password(token):
         """, (reset_id,))
 
         conn.commit()
+        cursor.close()
         conn.close()
 
         flash("密码重置成功，请重新登录", "success")
         return redirect("/login")
 
+    cursor.close()
     conn.close()
     return render_template("reset_password.html")
 
@@ -535,5 +565,4 @@ def logout():
 
 
 if __name__ == "__main__":
-    init_db()
     app.run(debug=False)
