@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <link rel="icon" type="image/png" sizes="48x48" href="{{ url_for('static', filename='favicon.png') }}">
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='favicon.png') }}">
+    <meta name="description" content=" Saturn_shine 的个人技术网站">
 </head>
 <body class="auth-page">
 
@@ -26,7 +27,9 @@
 
     <div class="auth-card auth-card-large">
         <div class="auth-top">
-            <div class="brand-badge">S</div>
+            <div class="brand-badge">
+                <img src="{{ url_for('static', filename='logo.png') }}" alt="logo">
+            </div>
             <h1>𝒞𝒾𝒶𝓁𝓁𝑜 ~ (∠ · ω&lt; )︵☆</h1>
             <p>请登录你的账户</p>
         </div>

@@ -96,18 +96,24 @@ body {
 }
 
 .brand-badge {
-    width: 58px;
-    height: 58px;
-    margin: 0 auto 14px;
-    border-radius: 18px;
-    background: linear-gradient(135deg, var(--primary-1), var(--primary-2));
+    width: 72px;
+    height: 72px;
+    margin: 0 auto 18px;
+    border-radius: 22px;
     display: flex;
     justify-content: center;
     align-items: center;
-    font-size: 24px;
-    font-weight: 700;
-    color: white;
-    box-shadow: 0 10px 28px rgba(91, 140, 255, 0.35);
+    overflow: hidden;
+    flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.03);
+    box-shadow: 0 12px 30px rgba(191, 235, 31, 0.938);
+}
+
+.brand-badge img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
 }
 
 .auth-top h1 {
@@ -884,9 +890,10 @@ body {
     }
 
     .brand-badge {
-        width: 54px;
-        height: 54px;
-        font-size: 22px;
+        width: 64px;
+        height: 64px;
+        border-radius: 18px;
+        box-shadow: 0 12px 32px rgba(191, 235, 31, 0.938);
     }
 
     .auth-top h1 {
@@ -1015,9 +1022,10 @@ body {
     }
 
     .brand-badge {
-        width: 50px;
-        height: 50px;
+        width: 58px;
+        height: 58px;
         border-radius: 16px;
+        box-shadow: 0 12px 32px rgba(191, 235, 31, 0.938);
     }
 
     .auth-top h1 {

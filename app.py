@@ -160,7 +160,6 @@ def count_recent_by_ip(cursor, table_name, ip_address, after_time):
     return cursor.fetchone()[0]
 
 
-# 启动时初始化数据库
 init_db()
 
 
